@@ -1,5 +1,5 @@
 /*
- * Copyright 2012-2019 the original author or authors.
+ * Copyright 2012-2021 the original author or authors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -16,6 +16,9 @@
 
 package org.springframework.boot.autoconfigure.task;
 
+import java.time.Duration;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CountDownLatch;
@@ -23,8 +26,10 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
 
+import org.awaitility.Awaitility;
 import org.junit.jupiter.api.Test;
 
+import org.springframework.boot.LazyInitializationBeanFactoryPostProcessor;
 import org.springframework.boot.autoconfigure.AutoConfigurations;
 import org.springframework.boot.task.TaskSchedulerCustomizer;
 import org.springframework.boot.test.context.runner.ApplicationContextRunner;
@@ -47,7 +52,7 @@ import static org.assertj.core.api.Assertions.assertThat;
  */
 class TaskSchedulingAutoConfigurationTests {
 
-	private ApplicationContextRunner contextRunner = new ApplicationContextRunner()
+	private final ApplicationContextRunner contextRunner = new ApplicationContextRunner()
 			.withUserConfiguration(TestConfiguration.class)
 			.withConfiguration(AutoConfigurations.of(TaskSchedulingAutoConfiguration.class));
 
@@ -68,7 +73,7 @@ class TaskSchedulingAutoConfigurationTests {
 					TestBean bean = context.getBean(TestBean.class);
 					assertThat(bean.latch.await(30, TimeUnit.SECONDS)).isTrue();
 					assertThat(taskExecutor).hasFieldOrPropertyWithValue("waitForTasksToCompleteOnShutdown", true);
-					assertThat(taskExecutor).hasFieldOrPropertyWithValue("awaitTerminationSeconds", 30);
+					assertThat(taskExecutor).hasFieldOrPropertyWithValue("awaitTerminationMillis", 30000L);
 					assertThat(bean.threadNames).allMatch((name) -> name.contains("scheduling-test-"));
 				});
 	}
@@ -118,6 +123,22 @@ class TaskSchedulingAutoConfigurationTests {
 					TestBean bean = context.getBean(TestBean.class);
 					assertThat(bean.latch.await(30, TimeUnit.SECONDS)).isTrue();
 					assertThat(bean.threadNames).containsExactly("test-1");
+				});
+	}
+
+	@Test
+	void enableSchedulingWithLazyInitializationInvokeScheduledMethods() {
+		List<String> threadNames = new ArrayList<>();
+		new ApplicationContextRunner()
+				.withInitializer((context) -> context
+						.addBeanFactoryPostProcessor(new LazyInitializationBeanFactoryPostProcessor()))
+				.withPropertyValues("spring.task.scheduling.thread-name-prefix=scheduling-test-")
+				.withBean(LazyTestBean.class, () -> new LazyTestBean(threadNames))
+				.withUserConfiguration(SchedulingConfiguration.class)
+				.withConfiguration(AutoConfigurations.of(TaskSchedulingAutoConfiguration.class)).run((context) -> {
+					// No lazy lookup.
+					Awaitility.waitAtMost(Duration.ofSeconds(3)).until(() -> !threadNames.isEmpty());
+					assertThat(threadNames).allMatch((name) -> name.contains("scheduling-test-"));
 				});
 	}
 
@@ -189,6 +210,21 @@ class TaskSchedulingAutoConfigurationTests {
 		void accumulate() {
 			this.threadNames.add(Thread.currentThread().getName());
 			this.latch.countDown();
+		}
+
+	}
+
+	static class LazyTestBean {
+
+		private final List<String> threadNames;
+
+		LazyTestBean(List<String> threadNames) {
+			this.threadNames = threadNames;
+		}
+
+		@Scheduled(fixedRate = 2000)
+		void accumulate() {
+			this.threadNames.add(Thread.currentThread().getName());
 		}
 
 	}

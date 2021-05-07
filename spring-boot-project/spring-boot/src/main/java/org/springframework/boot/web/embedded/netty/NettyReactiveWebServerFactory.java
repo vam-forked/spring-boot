@@ -1,5 +1,5 @@
 /*
- * Copyright 2012-2019 the original author or authors.
+ * Copyright 2012-2021 the original author or authors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -31,6 +31,7 @@ import reactor.netty.resources.LoopResources;
 
 import org.springframework.boot.web.reactive.server.AbstractReactiveWebServerFactory;
 import org.springframework.boot.web.reactive.server.ReactiveWebServerFactory;
+import org.springframework.boot.web.server.Shutdown;
 import org.springframework.boot.web.server.WebServer;
 import org.springframework.http.client.reactive.ReactorResourceFactory;
 import org.springframework.http.server.reactive.HttpHandler;
@@ -55,6 +56,8 @@ public class NettyReactiveWebServerFactory extends AbstractReactiveWebServerFact
 
 	private ReactorResourceFactory resourceFactory;
 
+	private Shutdown shutdown;
+
 	public NettyReactiveWebServerFactory() {
 	}
 
@@ -66,9 +69,15 @@ public class NettyReactiveWebServerFactory extends AbstractReactiveWebServerFact
 	public WebServer getWebServer(HttpHandler httpHandler) {
 		HttpServer httpServer = createHttpServer();
 		ReactorHttpHandlerAdapter handlerAdapter = new ReactorHttpHandlerAdapter(httpHandler);
-		NettyWebServer webServer = new NettyWebServer(httpServer, handlerAdapter, this.lifecycleTimeout);
+		NettyWebServer webServer = createNettyWebServer(httpServer, handlerAdapter, this.lifecycleTimeout,
+				getShutdown());
 		webServer.setRouteProviders(this.routeProviders);
 		return webServer;
+	}
+
+	NettyWebServer createNettyWebServer(HttpServer httpServer, ReactorHttpHandlerAdapter handlerAdapter,
+			Duration lifecycleTimeout, Shutdown shutdown) {
+		return new NettyWebServer(httpServer, handlerAdapter, lifecycleTimeout, shutdown);
 	}
 
 	/**
@@ -136,21 +145,28 @@ public class NettyReactiveWebServerFactory extends AbstractReactiveWebServerFact
 		this.resourceFactory = resourceFactory;
 	}
 
+	@Override
+	public void setShutdown(Shutdown shutdown) {
+		this.shutdown = shutdown;
+	}
+
+	@Override
+	public Shutdown getShutdown() {
+		return this.shutdown;
+	}
+
 	private HttpServer createHttpServer() {
 		HttpServer server = HttpServer.create();
 		if (this.resourceFactory != null) {
 			LoopResources resources = this.resourceFactory.getLoopResources();
 			Assert.notNull(resources, "No LoopResources: is ReactorResourceFactory not initialized yet?");
-			server = server.tcpConfiguration(
-					(tcpServer) -> tcpServer.runOn(resources).addressSupplier(this::getListenAddress));
+			server = server.runOn(resources).bindAddress(this::getListenAddress);
 		}
 		else {
-			server = server.tcpConfiguration((tcpServer) -> tcpServer.addressSupplier(this::getListenAddress));
+			server = server.bindAddress(this::getListenAddress);
 		}
 		if (getSsl() != null && getSsl().isEnabled()) {
-			SslServerCustomizer sslServerCustomizer = new SslServerCustomizer(getSsl(), getHttp2(),
-					getSslStoreProvider());
-			server = sslServerCustomizer.apply(server);
+			server = customizeSslConfiguration(server);
 		}
 		if (getCompression() != null && getCompression().getEnabled()) {
 			CompressionCustomizer compressionCustomizer = new CompressionCustomizer(getCompression());
@@ -160,11 +176,24 @@ public class NettyReactiveWebServerFactory extends AbstractReactiveWebServerFact
 		return applyCustomizers(server);
 	}
 
+	@SuppressWarnings("deprecation")
+	private HttpServer customizeSslConfiguration(HttpServer httpServer) {
+		SslServerCustomizer sslServerCustomizer = new SslServerCustomizer(getSsl(), getHttp2(), getSslStoreProvider());
+		return sslServerCustomizer.apply(httpServer);
+	}
+
 	private HttpProtocol[] listProtocols() {
-		if (getHttp2() != null && getHttp2().isEnabled() && getSsl() != null && getSsl().isEnabled()) {
-			return new HttpProtocol[] { HttpProtocol.H2, HttpProtocol.HTTP11 };
+		List<HttpProtocol> protocols = new ArrayList<>();
+		protocols.add(HttpProtocol.HTTP11);
+		if (getHttp2() != null && getHttp2().isEnabled()) {
+			if (getSsl() != null && getSsl().isEnabled()) {
+				protocols.add(HttpProtocol.H2);
+			}
+			else {
+				protocols.add(HttpProtocol.H2C);
+			}
 		}
-		return new HttpProtocol[] { HttpProtocol.HTTP11 };
+		return protocols.toArray(new HttpProtocol[0]);
 	}
 
 	private InetSocketAddress getListenAddress() {

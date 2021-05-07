@@ -1,5 +1,5 @@
 /*
- * Copyright 2012-2019 the original author or authors.
+ * Copyright 2012-2021 the original author or authors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -23,9 +23,10 @@ import java.io.IOException;
 import org.gradle.testkit.runner.BuildResult;
 import org.gradle.testkit.runner.TaskOutcome;
 import org.junit.jupiter.api.TestTemplate;
-import org.junit.jupiter.api.extension.ExtendWith;
+import org.junit.jupiter.api.condition.DisabledForJreRange;
+import org.junit.jupiter.api.condition.JRE;
 
-import org.springframework.boot.gradle.junit.GradleCompatibilityExtension;
+import org.springframework.boot.gradle.junit.GradleCompatibility;
 import org.springframework.boot.gradle.testkit.GradleBuild;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -35,13 +36,14 @@ import static org.assertj.core.api.Assertions.assertThat;
  *
  * @author Andy Wilkinson
  */
-@ExtendWith(GradleCompatibilityExtension.class)
-public class MavenIntegrationTests {
+@DisabledForJreRange(min = JRE.JAVA_16)
+@GradleCompatibility(versionsLessThan = "7.0-milestone-1")
+class MavenIntegrationTests {
 
 	GradleBuild gradleBuild;
 
 	@TestTemplate
-	public void bootJarCanBeUploaded() throws FileNotFoundException, IOException {
+	void bootJarCanBeUploaded() throws FileNotFoundException, IOException {
 		BuildResult result = this.gradleBuild.expectDeprecationWarningsWithAtLeastVersion("6.0.0")
 				.build("uploadBootArchives");
 		assertThat(result.task(":uploadBootArchives").getOutcome()).isEqualTo(TaskOutcome.SUCCESS);
@@ -51,7 +53,7 @@ public class MavenIntegrationTests {
 	}
 
 	@TestTemplate
-	public void bootWarCanBeUploaded() throws IOException {
+	void bootWarCanBeUploaded() throws IOException {
 		BuildResult result = this.gradleBuild.expectDeprecationWarningsWithAtLeastVersion("6.0.0")
 				.build("uploadBootArchives");
 		assertThat(result.task(":uploadBootArchives").getOutcome()).isEqualTo(TaskOutcome.SUCCESS);

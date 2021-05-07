@@ -1,5 +1,5 @@
 /*
- * Copyright 2012-2019 the original author or authors.
+ * Copyright 2012-2021 the original author or authors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -36,8 +36,10 @@ import org.springframework.context.annotation.ConditionContext;
 import org.springframework.context.annotation.Conditional;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.context.annotation.Import;
+import org.springframework.core.env.Environment;
 import org.springframework.core.type.AnnotatedTypeMetadata;
 import org.springframework.jdbc.datasource.embedded.EmbeddedDatabaseType;
+import org.springframework.util.StringUtils;
 
 /**
  * {@link EnableAutoConfiguration Auto-configuration} for {@link DataSource}.
@@ -48,10 +50,14 @@ import org.springframework.jdbc.datasource.embedded.EmbeddedDatabaseType;
  * @author Kazuki Shimizu
  * @since 1.0.0
  */
+@SuppressWarnings("deprecation")
 @Configuration(proxyBeanMethods = false)
 @ConditionalOnClass({ DataSource.class, EmbeddedDatabaseType.class })
+@ConditionalOnMissingBean(type = "io.r2dbc.spi.ConnectionFactory")
 @EnableConfigurationProperties(DataSourceProperties.class)
-@Import({ DataSourcePoolMetadataProvidersConfiguration.class, DataSourceInitializationConfiguration.class })
+@Import({ DataSourcePoolMetadataProvidersConfiguration.class,
+		DataSourceInitializationConfiguration.InitializationSpecificCredentialsDataSourceInitializationConfiguration.class,
+		DataSourceInitializationConfiguration.SharedCredentialsDataSourceInitializationConfiguration.class })
 public class DataSourceAutoConfiguration {
 
 	@Configuration(proxyBeanMethods = false)
@@ -66,8 +72,8 @@ public class DataSourceAutoConfiguration {
 	@Conditional(PooledDataSourceCondition.class)
 	@ConditionalOnMissingBean({ DataSource.class, XADataSource.class })
 	@Import({ DataSourceConfiguration.Hikari.class, DataSourceConfiguration.Tomcat.class,
-			DataSourceConfiguration.Dbcp2.class, DataSourceConfiguration.Generic.class,
-			DataSourceJmxConfiguration.class })
+			DataSourceConfiguration.Dbcp2.class, DataSourceConfiguration.OracleUcp.class,
+			DataSourceConfiguration.Generic.class, DataSourceJmxConfiguration.class })
 	protected static class PooledDataSourceConfiguration {
 
 	}
@@ -117,11 +123,16 @@ public class DataSourceAutoConfiguration {
 	 */
 	static class EmbeddedDatabaseCondition extends SpringBootCondition {
 
+		private static final String DATASOURCE_URL_PROPERTY = "spring.datasource.url";
+
 		private final SpringBootCondition pooledCondition = new PooledDataSourceCondition();
 
 		@Override
 		public ConditionOutcome getMatchOutcome(ConditionContext context, AnnotatedTypeMetadata metadata) {
 			ConditionMessage.Builder message = ConditionMessage.forCondition("EmbeddedDataSource");
+			if (hasDataSourceUrlProperty(context)) {
+				return ConditionOutcome.noMatch(message.because(DATASOURCE_URL_PROPERTY + " is set"));
+			}
 			if (anyMatches(context, metadata, this.pooledCondition)) {
 				return ConditionOutcome.noMatch(message.foundExactly("supported pooled data source"));
 			}
@@ -130,6 +141,19 @@ public class DataSourceAutoConfiguration {
 				return ConditionOutcome.noMatch(message.didNotFind("embedded database").atAll());
 			}
 			return ConditionOutcome.match(message.found("embedded database").items(type));
+		}
+
+		private boolean hasDataSourceUrlProperty(ConditionContext context) {
+			Environment environment = context.getEnvironment();
+			if (environment.containsProperty(DATASOURCE_URL_PROPERTY)) {
+				try {
+					return StringUtils.hasText(environment.getProperty(DATASOURCE_URL_PROPERTY));
+				}
+				catch (IllegalArgumentException ex) {
+					// Ignore unresolvable placeholder errors
+				}
+			}
+			return false;
 		}
 
 	}

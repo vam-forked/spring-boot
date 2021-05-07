@@ -1,5 +1,5 @@
 /*
- * Copyright 2012-2019 the original author or authors.
+ * Copyright 2012-2021 the original author or authors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -16,6 +16,7 @@
 
 package org.springframework.boot.web.embedded.undertow;
 
+import java.io.InputStream;
 import java.net.InetAddress;
 import java.net.Socket;
 import java.net.URL;
@@ -40,6 +41,7 @@ import org.xnio.Sequence;
 import org.xnio.SslClientAuthMode;
 
 import org.springframework.boot.web.server.Ssl;
+import org.springframework.boot.web.server.SslConfigurationValidator;
 import org.springframework.boot.web.server.SslStoreProvider;
 import org.springframework.boot.web.server.WebServerException;
 import org.springframework.util.ResourceUtils;
@@ -107,6 +109,7 @@ class SslBuilderCustomizer implements UndertowBuilderCustomizer {
 	private KeyManager[] getKeyManagers(Ssl ssl, SslStoreProvider sslStoreProvider) {
 		try {
 			KeyStore keyStore = getKeyStore(ssl, sslStoreProvider);
+			SslConfigurationValidator.validateKeyAlias(keyStore, ssl.getKeyAlias());
 			KeyManagerFactory keyManagerFactory = KeyManagerFactory
 					.getInstance(KeyManagerFactory.getDefaultAlgorithm());
 			char[] keyPassword = (ssl.getKeyPassword() != null) ? ssl.getKeyPassword().toCharArray() : null;
@@ -179,7 +182,9 @@ class SslBuilderCustomizer implements UndertowBuilderCustomizer {
 		KeyStore store = (provider != null) ? KeyStore.getInstance(type, provider) : KeyStore.getInstance(type);
 		try {
 			URL url = ResourceUtils.getURL(resource);
-			store.load(url.openStream(), (password != null) ? password.toCharArray() : null);
+			try (InputStream stream = url.openStream()) {
+				store.load(stream, (password != null) ? password.toCharArray() : null);
+			}
 			return store;
 		}
 		catch (Exception ex) {

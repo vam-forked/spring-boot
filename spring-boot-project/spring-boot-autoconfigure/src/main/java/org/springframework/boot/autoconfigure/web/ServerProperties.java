@@ -1,5 +1,5 @@
 /*
- * Copyright 2012-2019 the original author or authors.
+ * Copyright 2012-2021 the original author or authors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -31,12 +31,13 @@ import java.util.Map;
 import io.undertow.UndertowOptions;
 
 import org.springframework.boot.context.properties.ConfigurationProperties;
-import org.springframework.boot.context.properties.DeprecatedConfigurationProperty;
 import org.springframework.boot.context.properties.NestedConfigurationProperty;
 import org.springframework.boot.convert.DurationUnit;
 import org.springframework.boot.web.server.Compression;
 import org.springframework.boot.web.server.Http2;
+import org.springframework.boot.web.server.Shutdown;
 import org.springframework.boot.web.server.Ssl;
+import org.springframework.boot.web.servlet.server.Encoding;
 import org.springframework.boot.web.servlet.server.Jsp;
 import org.springframework.boot.web.servlet.server.Session;
 import org.springframework.util.StringUtils;
@@ -64,6 +65,8 @@ import org.springframework.util.unit.DataSize;
  * @author Dirk Deyne
  * @author HaiTao Zhang
  * @author Victor Mandujano
+ * @author Chris Bono
+ * @author Parviz Rozikov
  * @since 1.0.0
  */
 @ConfigurationProperties(prefix = "server", ignoreUnknownFields = true)
@@ -85,7 +88,7 @@ public class ServerProperties {
 	/**
 	 * Strategy for handling X-Forwarded-* headers.
 	 */
-	private ForwardHeadersStrategy forwardHeadersStrategy = ForwardHeadersStrategy.NONE;
+	private ForwardHeadersStrategy forwardHeadersStrategy;
 
 	/**
 	 * Value to use for the Server response header (if empty, no header is sent).
@@ -98,11 +101,9 @@ public class ServerProperties {
 	private DataSize maxHttpHeaderSize = DataSize.ofKilobytes(8);
 
 	/**
-	 * Time that connectors wait for another HTTP request before closing the connection.
-	 * When not set, the connector's container-specific default is used. Use a value of -1
-	 * to indicate no (that is, an infinite) timeout.
+	 * Type of shutdown that the server will support.
 	 */
-	private Duration connectionTimeout;
+	private Shutdown shutdown = Shutdown.IMMEDIATE;
 
 	@NestedConfigurationProperty
 	private Ssl ssl;
@@ -139,17 +140,6 @@ public class ServerProperties {
 		this.address = address;
 	}
 
-	@DeprecatedConfigurationProperty(reason = "replaced to support additional strategies",
-			replacement = "server.forward-headers-strategy")
-	public Boolean isUseForwardHeaders() {
-		return ForwardHeadersStrategy.NATIVE.equals(this.forwardHeadersStrategy);
-	}
-
-	public void setUseForwardHeaders(Boolean useForwardHeaders) {
-		this.forwardHeadersStrategy = Boolean.TRUE.equals(useForwardHeaders) ? ForwardHeadersStrategy.NATIVE
-				: ForwardHeadersStrategy.NONE;
-	}
-
 	public String getServerHeader() {
 		return this.serverHeader;
 	}
@@ -166,16 +156,12 @@ public class ServerProperties {
 		this.maxHttpHeaderSize = maxHttpHeaderSize;
 	}
 
-	@Deprecated
-	@DeprecatedConfigurationProperty(
-			reason = "Each server behaves differently. Use server specific properties instead.")
-	public Duration getConnectionTimeout() {
-		return this.connectionTimeout;
+	public Shutdown getShutdown() {
+		return this.shutdown;
 	}
 
-	@Deprecated
-	public void setConnectionTimeout(Duration connectionTimeout) {
-		this.connectionTimeout = connectionTimeout;
+	public void setShutdown(Shutdown shutdown) {
+		this.shutdown = shutdown;
 	}
 
 	public ErrorProperties getError() {
@@ -246,6 +232,14 @@ public class ServerProperties {
 		 */
 		private String applicationDisplayName = "application";
 
+		/**
+		 * Whether to register the default Servlet with the container.
+		 */
+		private boolean registerDefaultServlet = false;
+
+		@NestedConfigurationProperty
+		private final Encoding encoding = new Encoding();
+
 		@NestedConfigurationProperty
 		private final Jsp jsp = new Jsp();
 
@@ -276,8 +270,20 @@ public class ServerProperties {
 			this.applicationDisplayName = displayName;
 		}
 
+		public boolean isRegisterDefaultServlet() {
+			return this.registerDefaultServlet;
+		}
+
+		public void setRegisterDefaultServlet(boolean registerDefaultServlet) {
+			this.registerDefaultServlet = registerDefaultServlet;
+		}
+
 		public Map<String, String> getContextParameters() {
 			return this.contextParameters;
+		}
+
+		public Encoding getEncoding() {
+			return this.encoding;
 		}
 
 		public Jsp getJsp() {
@@ -301,6 +307,11 @@ public class ServerProperties {
 		private final Accesslog accesslog = new Accesslog();
 
 		/**
+		 * Thread related configuration.
+		 */
+		private final Threads threads = new Threads();
+
+		/**
 		 * Tomcat base directory. If not specified, a temporary directory is used.
 		 */
 		private File basedir;
@@ -311,16 +322,6 @@ public class ServerProperties {
 		 */
 		@DurationUnit(ChronoUnit.SECONDS)
 		private Duration backgroundProcessorDelay = Duration.ofSeconds(10);
-
-		/**
-		 * Maximum amount of worker threads.
-		 */
-		private int maxThreads = 200;
-
-		/**
-		 * Minimum amount of worker threads.
-		 */
-		private int minSpareThreads = 10;
 
 		/**
 		 * Maximum size of the form content in any HTTP post request.
@@ -334,7 +335,8 @@ public class ServerProperties {
 
 		/**
 		 * Whether requests to the context root should be redirected by appending a / to
-		 * the path.
+		 * the path. When using SSL terminated at a proxy, this property should be set to
+		 * false.
 		 */
 		private Boolean redirectContextRoot = true;
 
@@ -342,7 +344,7 @@ public class ServerProperties {
 		 * Whether HTTP 1.1 and later location headers generated by a call to sendRedirect
 		 * will use relative or absolute redirects.
 		 */
-		private Boolean useRelativeRedirects;
+		private boolean useRelativeRedirects;
 
 		/**
 		 * Character encoding to use to decode the URI.
@@ -354,7 +356,7 @@ public class ServerProperties {
 		 * given time. Once the limit has been reached, the operating system may still
 		 * accept connections based on the "acceptCount" property.
 		 */
-		private int maxConnections = 10000;
+		private int maxConnections = 8192;
 
 		/**
 		 * Maximum queue length for incoming connection requests when all possible request
@@ -368,6 +370,19 @@ public class ServerProperties {
 		 * theoretical maximum size equal to the maximum number of connections.
 		 */
 		private int processorCache = 200;
+
+		/**
+		 * Time to wait for another HTTP request before the connection is closed. When not
+		 * set the connectionTimeout is used. When set to -1 there will be no timeout.
+		 */
+		private Duration keepAliveTimeout;
+
+		/**
+		 * Maximum number of HTTP requests that can be pipelined before the connection is
+		 * closed. When set to 0 or 1, keep-alive and pipelining are disabled. When set to
+		 * -1, an unlimited number of pipelined or keep-alive requests are allowed.
+		 */
+		private int maxKeepAliveRequests = 100;
 
 		/**
 		 * Comma-separated list of additional patterns that match jars to ignore for TLD
@@ -409,33 +424,6 @@ public class ServerProperties {
 		 */
 		private final Remoteip remoteip = new Remoteip();
 
-		public int getMaxThreads() {
-			return this.maxThreads;
-		}
-
-		public void setMaxThreads(int maxThreads) {
-			this.maxThreads = maxThreads;
-		}
-
-		public int getMinSpareThreads() {
-			return this.minSpareThreads;
-		}
-
-		public void setMinSpareThreads(int minSpareThreads) {
-			this.minSpareThreads = minSpareThreads;
-		}
-
-		@Deprecated
-		@DeprecatedConfigurationProperty(replacement = "server.tomcat.max-http-form-post-size")
-		public DataSize getMaxHttpPostSize() {
-			return this.maxHttpFormPostSize;
-		}
-
-		@Deprecated
-		public void setMaxHttpPostSize(DataSize maxHttpPostSize) {
-			this.maxHttpFormPostSize = maxHttpPostSize;
-		}
-
 		public DataSize getMaxHttpFormPostSize() {
 			return this.maxHttpFormPostSize;
 		}
@@ -446,6 +434,10 @@ public class ServerProperties {
 
 		public Accesslog getAccesslog() {
 			return this.accesslog;
+		}
+
+		public Threads getThreads() {
+			return this.threads;
 		}
 
 		public Duration getBackgroundProcessorDelay() {
@@ -464,60 +456,6 @@ public class ServerProperties {
 			this.basedir = basedir;
 		}
 
-		@DeprecatedConfigurationProperty(replacement = "server.tomcat.remoteip.internal-proxies")
-		public String getInternalProxies() {
-			return this.remoteip.getInternalProxies();
-		}
-
-		public void setInternalProxies(String internalProxies) {
-			this.remoteip.setInternalProxies(internalProxies);
-		}
-
-		@DeprecatedConfigurationProperty(replacement = "server.tomcat.remoteip.protocol-header")
-		public String getProtocolHeader() {
-			return this.remoteip.getProtocolHeader();
-		}
-
-		public void setProtocolHeader(String protocolHeader) {
-			this.remoteip.setProtocolHeader(protocolHeader);
-		}
-
-		@DeprecatedConfigurationProperty(replacement = "server.tomcat.remoteip.protocol-header-https-value")
-		public String getProtocolHeaderHttpsValue() {
-			return this.remoteip.getProtocolHeaderHttpsValue();
-		}
-
-		public void setProtocolHeaderHttpsValue(String protocolHeaderHttpsValue) {
-			this.remoteip.setProtocolHeaderHttpsValue(protocolHeaderHttpsValue);
-		}
-
-		@DeprecatedConfigurationProperty(replacement = "server.tomcat.remoteip.host-header")
-		public String getHostHeader() {
-			return this.remoteip.getHostHeader();
-		}
-
-		public void setHostHeader(String hostHeader) {
-			this.remoteip.setHostHeader(hostHeader);
-		}
-
-		@DeprecatedConfigurationProperty(replacement = "server.tomcat.remote.port-header")
-		public String getPortHeader() {
-			return this.remoteip.getPortHeader();
-		}
-
-		public void setPortHeader(String portHeader) {
-			this.remoteip.setPortHeader(portHeader);
-		}
-
-		@DeprecatedConfigurationProperty(replacement = "server.tomcat.remoteip.remote-ip-header")
-		public String getRemoteIpHeader() {
-			return this.remoteip.getRemoteIpHeader();
-		}
-
-		public void setRemoteIpHeader(String remoteIpHeader) {
-			this.remoteip.setRemoteIpHeader(remoteIpHeader);
-		}
-
 		public Boolean getRedirectContextRoot() {
 			return this.redirectContextRoot;
 		}
@@ -526,11 +464,11 @@ public class ServerProperties {
 			this.redirectContextRoot = redirectContextRoot;
 		}
 
-		public Boolean getUseRelativeRedirects() {
+		public boolean isUseRelativeRedirects() {
 			return this.useRelativeRedirects;
 		}
 
-		public void setUseRelativeRedirects(Boolean useRelativeRedirects) {
+		public void setUseRelativeRedirects(boolean useRelativeRedirects) {
 			this.useRelativeRedirects = useRelativeRedirects;
 		}
 
@@ -572,6 +510,22 @@ public class ServerProperties {
 
 		public void setProcessorCache(int processorCache) {
 			this.processorCache = processorCache;
+		}
+
+		public Duration getKeepAliveTimeout() {
+			return this.keepAliveTimeout;
+		}
+
+		public void setKeepAliveTimeout(Duration keepAliveTimeout) {
+			this.keepAliveTimeout = keepAliveTimeout;
+		}
+
+		public int getMaxKeepAliveRequests() {
+			return this.maxKeepAliveRequests;
+		}
+
+		public void setMaxKeepAliveRequests(int maxKeepAliveRequests) {
+			this.maxKeepAliveRequests = maxKeepAliveRequests;
 		}
 
 		public List<String> getAdditionalTldSkipPatterns() {
@@ -855,6 +809,39 @@ public class ServerProperties {
 		}
 
 		/**
+		 * Tomcat thread properties.
+		 */
+		public static class Threads {
+
+			/**
+			 * Maximum amount of worker threads.
+			 */
+			private int max = 200;
+
+			/**
+			 * Minimum amount of worker threads.
+			 */
+			private int minSpare = 10;
+
+			public int getMax() {
+				return this.max;
+			}
+
+			public void setMax(int max) {
+				this.max = max;
+			}
+
+			public int getMinSpare() {
+				return this.minSpare;
+			}
+
+			public void setMinSpare(int minSpare) {
+				this.minSpare = minSpare;
+			}
+
+		}
+
+		/**
 		 * Tomcat static resource properties.
 		 */
 		public static class Resource {
@@ -1007,36 +994,14 @@ public class ServerProperties {
 		private final Accesslog accesslog = new Accesslog();
 
 		/**
+		 * Thread related configuration.
+		 */
+		private final Threads threads = new Threads();
+
+		/**
 		 * Maximum size of the form content in any HTTP post request.
 		 */
 		private DataSize maxHttpFormPostSize = DataSize.ofBytes(200000);
-
-		/**
-		 * Number of acceptor threads to use. When the value is -1, the default, the
-		 * number of acceptors is derived from the operating environment.
-		 */
-		private Integer acceptors = -1;
-
-		/**
-		 * Number of selector threads to use. When the value is -1, the default, the
-		 * number of selectors is derived from the operating environment.
-		 */
-		private Integer selectors = -1;
-
-		/**
-		 * Maximum number of threads.
-		 */
-		private Integer maxThreads = 200;
-
-		/**
-		 * Minimum number of threads.
-		 */
-		private Integer minThreads = 8;
-
-		/**
-		 * Maximum thread idle time.
-		 */
-		private Duration threadIdleTimeout = Duration.ofMillis(60000);
 
 		/**
 		 * Time that the connection can be idle before it is closed.
@@ -1047,15 +1012,8 @@ public class ServerProperties {
 			return this.accesslog;
 		}
 
-		@Deprecated
-		@DeprecatedConfigurationProperty(replacement = "server.jetty.max-http-form-post-size")
-		public DataSize getMaxHttpPostSize() {
-			return this.maxHttpFormPostSize;
-		}
-
-		@Deprecated
-		public void setMaxHttpPostSize(DataSize maxHttpPostSize) {
-			this.maxHttpFormPostSize = maxHttpPostSize;
+		public Threads getThreads() {
+			return this.threads;
 		}
 
 		public DataSize getMaxHttpFormPostSize() {
@@ -1064,46 +1022,6 @@ public class ServerProperties {
 
 		public void setMaxHttpFormPostSize(DataSize maxHttpFormPostSize) {
 			this.maxHttpFormPostSize = maxHttpFormPostSize;
-		}
-
-		public Integer getAcceptors() {
-			return this.acceptors;
-		}
-
-		public void setAcceptors(Integer acceptors) {
-			this.acceptors = acceptors;
-		}
-
-		public Integer getSelectors() {
-			return this.selectors;
-		}
-
-		public void setSelectors(Integer selectors) {
-			this.selectors = selectors;
-		}
-
-		public void setMinThreads(Integer minThreads) {
-			this.minThreads = minThreads;
-		}
-
-		public Integer getMinThreads() {
-			return this.minThreads;
-		}
-
-		public void setMaxThreads(Integer maxThreads) {
-			this.maxThreads = maxThreads;
-		}
-
-		public Integer getMaxThreads() {
-			return this.maxThreads;
-		}
-
-		public void setThreadIdleTimeout(Duration threadIdleTimeout) {
-			this.threadIdleTimeout = threadIdleTimeout;
-		}
-
-		public Duration getThreadIdleTimeout() {
-			return this.threadIdleTimeout;
 		}
 
 		public Duration getConnectionIdleTimeout() {
@@ -1244,6 +1162,94 @@ public class ServerProperties {
 
 		}
 
+		/**
+		 * Jetty thread properties.
+		 */
+		public static class Threads {
+
+			/**
+			 * Number of acceptor threads to use. When the value is -1, the default, the
+			 * number of acceptors is derived from the operating environment.
+			 */
+			private Integer acceptors = -1;
+
+			/**
+			 * Number of selector threads to use. When the value is -1, the default, the
+			 * number of selectors is derived from the operating environment.
+			 */
+			private Integer selectors = -1;
+
+			/**
+			 * Maximum number of threads.
+			 */
+			private Integer max = 200;
+
+			/**
+			 * Minimum number of threads.
+			 */
+			private Integer min = 8;
+
+			/**
+			 * Maximum capacity of the thread pool's backing queue. A default is computed
+			 * based on the threading configuration.
+			 */
+			private Integer maxQueueCapacity;
+
+			/**
+			 * Maximum thread idle time.
+			 */
+			private Duration idleTimeout = Duration.ofMillis(60000);
+
+			public Integer getAcceptors() {
+				return this.acceptors;
+			}
+
+			public void setAcceptors(Integer acceptors) {
+				this.acceptors = acceptors;
+			}
+
+			public Integer getSelectors() {
+				return this.selectors;
+			}
+
+			public void setSelectors(Integer selectors) {
+				this.selectors = selectors;
+			}
+
+			public void setMin(Integer min) {
+				this.min = min;
+			}
+
+			public Integer getMin() {
+				return this.min;
+			}
+
+			public void setMax(Integer max) {
+				this.max = max;
+			}
+
+			public Integer getMax() {
+				return this.max;
+			}
+
+			public Integer getMaxQueueCapacity() {
+				return this.maxQueueCapacity;
+			}
+
+			public void setMaxQueueCapacity(Integer maxQueueCapacity) {
+				this.maxQueueCapacity = maxQueueCapacity;
+			}
+
+			public void setIdleTimeout(Duration idleTimeout) {
+				this.idleTimeout = idleTimeout;
+			}
+
+			public Duration getIdleTimeout() {
+				return this.idleTimeout;
+			}
+
+		}
+
 	}
 
 	/**
@@ -1256,12 +1262,77 @@ public class ServerProperties {
 		 */
 		private Duration connectionTimeout;
 
+		/**
+		 * Maximum content length of an H2C upgrade request.
+		 */
+		private DataSize h2cMaxContentLength = DataSize.ofBytes(0);
+
+		/**
+		 * Initial buffer size for HTTP request decoding.
+		 */
+		private DataSize initialBufferSize = DataSize.ofBytes(128);
+
+		/**
+		 * Maximum chunk size that can be decoded for an HTTP request.
+		 */
+		private DataSize maxChunkSize = DataSize.ofKilobytes(8);
+
+		/**
+		 * Maximum length that can be decoded for an HTTP request's initial line.
+		 */
+		private DataSize maxInitialLineLength = DataSize.ofKilobytes(4);
+
+		/**
+		 * Whether to validate headers when decoding requests.
+		 */
+		private boolean validateHeaders = true;
+
 		public Duration getConnectionTimeout() {
 			return this.connectionTimeout;
 		}
 
 		public void setConnectionTimeout(Duration connectionTimeout) {
 			this.connectionTimeout = connectionTimeout;
+		}
+
+		public DataSize getH2cMaxContentLength() {
+			return this.h2cMaxContentLength;
+		}
+
+		public void setH2cMaxContentLength(DataSize h2cMaxContentLength) {
+			this.h2cMaxContentLength = h2cMaxContentLength;
+		}
+
+		public DataSize getInitialBufferSize() {
+			return this.initialBufferSize;
+		}
+
+		public void setInitialBufferSize(DataSize initialBufferSize) {
+			this.initialBufferSize = initialBufferSize;
+		}
+
+		public DataSize getMaxChunkSize() {
+			return this.maxChunkSize;
+		}
+
+		public void setMaxChunkSize(DataSize maxChunkSize) {
+			this.maxChunkSize = maxChunkSize;
+		}
+
+		public DataSize getMaxInitialLineLength() {
+			return this.maxInitialLineLength;
+		}
+
+		public void setMaxInitialLineLength(DataSize maxInitialLineLength) {
+			this.maxInitialLineLength = maxInitialLineLength;
+		}
+
+		public boolean isValidateHeaders() {
+			return this.validateHeaders;
+		}
+
+		public void setValidateHeaders(boolean validateHeaders) {
+			this.validateHeaders = validateHeaders;
 		}
 
 	}
@@ -1282,17 +1353,6 @@ public class ServerProperties {
 		 * that is available to the JVM.
 		 */
 		private DataSize bufferSize;
-
-		/**
-		 * Number of I/O threads to create for the worker. The default is derived from the
-		 * number of available processors.
-		 */
-		private Integer ioThreads;
-
-		/**
-		 * Number of worker threads. The default is 8 times the number of I/O threads.
-		 */
-		private Integer workerThreads;
 
 		/**
 		 * Whether to allocate buffers outside the Java heap. The default is derived from
@@ -1354,7 +1414,17 @@ public class ServerProperties {
 		 */
 		private Duration noRequestTimeout;
 
+		/**
+		 * Whether to preserve the path of a request when it is forwarded.
+		 */
+		private boolean preservePathOnForward = false;
+
 		private final Accesslog accesslog = new Accesslog();
+
+		/**
+		 * Thread related configuration.
+		 */
+		private final Threads threads = new Threads();
 
 		private final Options options = new Options();
 
@@ -1372,22 +1442,6 @@ public class ServerProperties {
 
 		public void setBufferSize(DataSize bufferSize) {
 			this.bufferSize = bufferSize;
-		}
-
-		public Integer getIoThreads() {
-			return this.ioThreads;
-		}
-
-		public void setIoThreads(Integer ioThreads) {
-			this.ioThreads = ioThreads;
-		}
-
-		public Integer getWorkerThreads() {
-			return this.workerThreads;
-		}
-
-		public void setWorkerThreads(Integer workerThreads) {
-			this.workerThreads = workerThreads;
 		}
 
 		public Boolean getDirectBuffers() {
@@ -1470,8 +1524,20 @@ public class ServerProperties {
 			this.noRequestTimeout = noRequestTimeout;
 		}
 
+		public boolean isPreservePathOnForward() {
+			return this.preservePathOnForward;
+		}
+
+		public void setPreservePathOnForward(boolean preservePathOnForward) {
+			this.preservePathOnForward = preservePathOnForward;
+		}
+
 		public Accesslog getAccesslog() {
 			return this.accesslog;
+		}
+
+		public Threads getThreads() {
+			return this.threads;
 		}
 
 		public Options getOptions() {
@@ -1559,6 +1625,40 @@ public class ServerProperties {
 
 			public void setRotate(boolean rotate) {
 				this.rotate = rotate;
+			}
+
+		}
+
+		/**
+		 * Undertow thread properties.
+		 */
+		public static class Threads {
+
+			/**
+			 * Number of I/O threads to create for the worker. The default is derived from
+			 * the number of available processors.
+			 */
+			private Integer io;
+
+			/**
+			 * Number of worker threads. The default is 8 times the number of I/O threads.
+			 */
+			private Integer worker;
+
+			public Integer getIo() {
+				return this.io;
+			}
+
+			public void setIo(Integer io) {
+				this.io = io;
+			}
+
+			public Integer getWorker() {
+				return this.worker;
+			}
+
+			public void setWorker(Integer worker) {
+				this.worker = worker;
 			}
 
 		}
