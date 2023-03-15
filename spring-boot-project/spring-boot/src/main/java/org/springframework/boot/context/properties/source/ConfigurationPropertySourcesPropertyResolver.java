@@ -1,5 +1,5 @@
 /*
- * Copyright 2012-2021 the original author or authors.
+ * Copyright 2012-2023 the original author or authors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -71,17 +71,17 @@ class ConfigurationPropertySourcesPropertyResolver extends AbstractPropertyResol
 	}
 
 	private <T> T getProperty(String key, Class<T> targetValueType, boolean resolveNestedPlaceholders) {
-		Object value = findPropertyValue(key, targetValueType);
+		Object value = findPropertyValue(key);
 		if (value == null) {
 			return null;
 		}
-		if (resolveNestedPlaceholders && value instanceof String) {
-			value = resolveNestedPlaceholders((String) value);
+		if (resolveNestedPlaceholders && value instanceof String string) {
+			value = resolveNestedPlaceholders(string);
 		}
 		return convertValueIfNecessary(value, targetValueType);
 	}
 
-	private Object findPropertyValue(String key, Class<?> targetValueType) {
+	private Object findPropertyValue(String key) {
 		ConfigurationPropertySourcesPropertySource attached = getAttached();
 		if (attached != null) {
 			ConfigurationPropertyName name = ConfigurationPropertyName.of(key, true);
@@ -94,15 +94,15 @@ class ConfigurationPropertySourcesPropertyResolver extends AbstractPropertyResol
 				}
 			}
 		}
-		return this.defaultResolver.getProperty(key, targetValueType, false);
+		return this.defaultResolver.getProperty(key, Object.class, false);
 	}
 
 	private ConfigurationPropertySourcesPropertySource getAttached() {
 		ConfigurationPropertySourcesPropertySource attached = (ConfigurationPropertySourcesPropertySource) ConfigurationPropertySources
-				.getAttached(this.propertySources);
+			.getAttached(this.propertySources);
 		Iterable<ConfigurationPropertySource> attachedSource = (attached != null) ? attached.getSource() : null;
-		if ((attachedSource instanceof SpringConfigurationPropertySources)
-				&& ((SpringConfigurationPropertySources) attachedSource).isUsingSources(this.propertySources)) {
+		if ((attachedSource instanceof SpringConfigurationPropertySources springSource)
+				&& springSource.isUsingSources(this.propertySources)) {
 			return attached;
 		}
 		return null;

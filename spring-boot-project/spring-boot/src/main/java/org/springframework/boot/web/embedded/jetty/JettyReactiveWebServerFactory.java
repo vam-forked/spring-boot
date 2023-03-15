@@ -1,5 +1,5 @@
 /*
- * Copyright 2012-2021 the original author or authors.
+ * Copyright 2012-2022 the original author or authors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -172,6 +172,7 @@ public class JettyReactiveWebServerFactory extends AbstractReactiveWebServerFact
 		InetSocketAddress address = new InetSocketAddress(getAddress(), port);
 		Server server = new Server(getThreadPool());
 		server.addConnector(createConnector(address, server));
+		server.setStopTimeout(0);
 		ServletHolder servletHolder = new ServletHolder(servlet);
 		servletHolder.setAsyncSupported(true);
 		ServletContextHandler contextHandler = new ServletContextHandler(server, "/", false, false);
@@ -235,7 +236,7 @@ public class JettyReactiveWebServerFactory extends AbstractReactiveWebServerFact
 	}
 
 	private void customizeSsl(Server server, InetSocketAddress address) {
-		new SslServerCustomizer(address, getSsl(), getSslStoreProvider(), getHttp2()).customize(server);
+		new SslServerCustomizer(address, getSsl(), getOrCreateSslStoreProvider(), getHttp2()).customize(server);
 	}
 
 }

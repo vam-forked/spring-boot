@@ -43,7 +43,9 @@ It loads SQL from the standard root classpath locations: `schema.sql` and `data.
 In addition, Spring Boot processes the `schema-$\{platform}.sql` and `data-$\{platform}.sql` files (if present), where `platform` is the value of configprop:spring.sql.init.platform[].
 This allows you to switch to database-specific scripts if necessary.
 For example, you might choose to set it to the vendor name of the database (`hsqldb`, `h2`, `oracle`, `mysql`, `postgresql`, and so on).
-SQL database initialization can be disabled by setting configprop:spring.sql.init.enabled[] to `false`.
+By default, SQL database initialization is only performed when using an embedded in-memory database.
+To always initialize an SQL database, irrespective of its type, set configprop:spring.sql.init.mode[] to `always`.
+Similarly, to disable initialization, set configprop:spring.sql.init.mode[] to `never`.
 By default, Spring Boot enables the fail-fast feature of its script-based database initializer.
 This means that, if the scripts cause exceptions, the application fails to start.
 You can tune that behavior by setting configprop:spring.sql.init.continue-on-error[].
@@ -160,7 +162,7 @@ To automatically run Liquibase database migrations on startup, add the `org.liqu
 ====
 When you add the `org.liquibase:liquibase-core` to your classpath, database migrations run by default for both during application startup and before your tests run.
 This behavior can be customized by using the configprop:spring.liquibase.enabled[] property, setting different values in the `main` and `test` configurations.
-It is not possible to use two different ways to initialize the database (e.g. Liquibase for application startup, JPA for test runs).
+It is not possible to use two different ways to initialize the database (for example Liquibase for application startup, JPA for test runs).
 ====
 
 By default, the master change log is read from `db/changelog/db.changelog-master.yaml`, but you can change the location by setting `spring.liquibase.change-log`.
@@ -198,7 +200,7 @@ Spring Boot will automatically detect beans of the following types that initiali
 - `SpringLiquibase`
 
 If you are using a third-party starter for a database initialization library, it may provide a detector such that beans of other types are also detected automatically.
-To have other beans be detected, register an implementation of `DatabaseInitializerDetector` in `META-INF/spring-factories`.
+To have other beans be detected, register an implementation of `DatabaseInitializerDetector` in `META-INF/spring.factories`.
 
 
 
@@ -213,5 +215,5 @@ Spring Boot will automatically detect beans of the following types that depends 
 - `NamedParameterJdbcOperations`
 
 If you are using a third-party starter data access library, it may provide a detector such that beans of other types are also detected automatically.
-To have other beans be detected, register an implementation of `DependsOnDatabaseInitializationDetector` in `META-INF/spring-factories`.
+To have other beans be detected, register an implementation of `DependsOnDatabaseInitializationDetector` in `META-INF/spring.factories`.
 Alternatively, annotate the bean's class or its `@Bean` method with `@DependsOnDatabaseInitialization`.

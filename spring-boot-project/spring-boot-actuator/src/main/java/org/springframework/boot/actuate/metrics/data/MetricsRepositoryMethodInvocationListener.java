@@ -1,5 +1,5 @@
 /*
- * Copyright 2012-2021 the original author or authors.
+ * Copyright 2012-2023 the original author or authors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -18,6 +18,7 @@ package org.springframework.boot.actuate.metrics.data;
 
 import java.util.Set;
 import java.util.concurrent.TimeUnit;
+import java.util.function.Supplier;
 
 import io.micrometer.core.annotation.Timed;
 import io.micrometer.core.instrument.MeterRegistry;
@@ -26,6 +27,7 @@ import io.micrometer.core.instrument.Tag;
 import org.springframework.boot.actuate.metrics.AutoTimer;
 import org.springframework.boot.actuate.metrics.annotation.TimedAnnotations;
 import org.springframework.data.repository.core.support.RepositoryMethodInvocationListener;
+import org.springframework.util.function.SingletonSupplier;
 
 /**
  * Intercepts Spring Data {@code Repository} invocations and records metrics about
@@ -36,7 +38,7 @@ import org.springframework.data.repository.core.support.RepositoryMethodInvocati
  */
 public class MetricsRepositoryMethodInvocationListener implements RepositoryMethodInvocationListener {
 
-	private final MeterRegistry registry;
+	private final SingletonSupplier<MeterRegistry> registrySupplier;
 
 	private final RepositoryTagsProvider tagsProvider;
 
@@ -46,14 +48,16 @@ public class MetricsRepositoryMethodInvocationListener implements RepositoryMeth
 
 	/**
 	 * Create a new {@code MetricsRepositoryMethodInvocationListener}.
-	 * @param registry the registry to which metrics are recorded
+	 * @param registrySupplier a supplier for the registry to which metrics are recorded
 	 * @param tagsProvider provider for metrics tags
 	 * @param metricName name of the metric to record
 	 * @param autoTimer the auto-timers to apply or {@code null} to disable auto-timing
+	 * @since 2.5.4
 	 */
-	public MetricsRepositoryMethodInvocationListener(MeterRegistry registry, RepositoryTagsProvider tagsProvider,
-			String metricName, AutoTimer autoTimer) {
-		this.registry = registry;
+	public MetricsRepositoryMethodInvocationListener(Supplier<MeterRegistry> registrySupplier,
+			RepositoryTagsProvider tagsProvider, String metricName, AutoTimer autoTimer) {
+		this.registrySupplier = (registrySupplier instanceof SingletonSupplier)
+				? (SingletonSupplier<MeterRegistry>) registrySupplier : SingletonSupplier.of(registrySupplier);
 		this.tagsProvider = tagsProvider;
 		this.metricName = metricName;
 		this.autoTimer = (autoTimer != null) ? autoTimer : AutoTimer.DISABLED;
@@ -65,7 +69,10 @@ public class MetricsRepositoryMethodInvocationListener implements RepositoryMeth
 		Iterable<Tag> tags = this.tagsProvider.repositoryTags(invocation);
 		long duration = invocation.getDuration(TimeUnit.NANOSECONDS);
 		AutoTimer.apply(this.autoTimer, this.metricName, annotations,
-				(builder) -> builder.tags(tags).register(this.registry).record(duration, TimeUnit.NANOSECONDS));
+				(builder) -> builder.description("Duration of repository invocations")
+					.tags(tags)
+					.register(this.registrySupplier.get())
+					.record(duration, TimeUnit.NANOSECONDS));
 	}
 
 }

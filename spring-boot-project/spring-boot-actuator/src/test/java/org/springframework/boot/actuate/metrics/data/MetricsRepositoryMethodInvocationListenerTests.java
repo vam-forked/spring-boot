@@ -1,5 +1,5 @@
 /*
- * Copyright 2012-2021 the original author or authors.
+ * Copyright 2012-2023 the original author or authors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -53,13 +53,13 @@ class MetricsRepositoryMethodInvocationListenerTests {
 	void setup() {
 		MockClock clock = new MockClock();
 		this.registry = new SimpleMeterRegistry(SimpleConfig.DEFAULT, clock);
-		this.listener = new MetricsRepositoryMethodInvocationListener(this.registry,
+		this.listener = new MetricsRepositoryMethodInvocationListener(() -> this.registry,
 				new DefaultRepositoryTagsProvider(), REQUEST_METRICS_NAME, AutoTimer.ENABLED);
 	}
 
 	@Test
 	void afterInvocationWhenNoTimerAnnotationsAndNoAutoTimerDoesNothing() {
-		this.listener = new MetricsRepositoryMethodInvocationListener(this.registry,
+		this.listener = new MetricsRepositoryMethodInvocationListener(() -> this.registry,
 				new DefaultRepositoryTagsProvider(), REQUEST_METRICS_NAME, null);
 		this.listener.afterInvocation(createInvocation(NoAnnotationsRepository.class));
 		assertThat(this.registry.find(REQUEST_METRICS_NAME).timers()).isEmpty();
@@ -86,7 +86,7 @@ class MetricsRepositoryMethodInvocationListenerTests {
 	}
 
 	private void assertMetricsContainsTag(String tagKey, String tagValue) {
-		assertThat(this.registry.get(REQUEST_METRICS_NAME).tag(tagKey, tagValue).timer().count()).isEqualTo(1);
+		assertThat(this.registry.get(REQUEST_METRICS_NAME).tag(tagKey, tagValue).timer().count()).isOne();
 	}
 
 	private RepositoryMethodInvocation createInvocation(Class<?> repositoryInterface) {

@@ -1,5 +1,5 @@
 /*
- * Copyright 2012-2021 the original author or authors.
+ * Copyright 2012-2023 the original author or authors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -19,6 +19,7 @@ package org.springframework.boot.context.properties.bind;
 import java.beans.PropertyEditorSupport;
 import java.io.File;
 import java.time.Duration;
+import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 import java.util.function.Consumer;
@@ -30,6 +31,7 @@ import org.mockito.junit.jupiter.MockitoExtension;
 
 import org.springframework.beans.PropertyEditorRegistry;
 import org.springframework.core.ResolvableType;
+import org.springframework.core.convert.ConversionFailedException;
 import org.springframework.core.convert.ConversionService;
 import org.springframework.core.convert.ConverterNotFoundException;
 import org.springframework.core.convert.TypeDescriptor;
@@ -39,7 +41,7 @@ import org.springframework.core.convert.support.GenericConversionService;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatExceptionOfType;
 import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.Mockito.verify;
+import static org.mockito.BDDMockito.then;
 
 /**
  * Tests for {@link BindConverter}.
@@ -61,14 +63,14 @@ class BindConverterTests {
 	@Test
 	void createWhenPropertyEditorInitializerIsNotNullShouldUseToInitialize() {
 		BindConverter.get(null, this.propertyEditorInitializer);
-		verify(this.propertyEditorInitializer).accept(any(PropertyEditorRegistry.class));
+		then(this.propertyEditorInitializer).should().accept(any(PropertyEditorRegistry.class));
 	}
 
 	@Test
 	void canConvertWhenHasDefaultEditorShouldReturnTrue() {
 		BindConverter bindConverter = getPropertyEditorOnlyBindConverter(null);
 		assertThat(bindConverter.canConvert("java.lang.RuntimeException", ResolvableType.forClass(Class.class)))
-				.isTrue();
+			.isTrue();
 	}
 
 	@Test
@@ -87,7 +89,7 @@ class BindConverterTests {
 	void canConvertWhenHasEditorForCollectionElementShouldReturnTrue() {
 		BindConverter bindConverter = getPropertyEditorOnlyBindConverter(this::registerSampleTypeEditor);
 		assertThat(bindConverter.canConvert("test", ResolvableType.forClassWithGenerics(List.class, SampleType.class)))
-				.isTrue();
+			.isTrue();
 	}
 
 	@Test
@@ -157,7 +159,7 @@ class BindConverterTests {
 	void convertWhenNotPropertyEditorAndConversionServiceCannotConvertShouldThrowException() {
 		BindConverter bindConverter = BindConverter.get(null, null);
 		assertThatExceptionOfType(ConverterNotFoundException.class)
-				.isThrownBy(() -> bindConverter.convert("test", ResolvableType.forClass(SampleType.class)));
+			.isThrownBy(() -> bindConverter.convert("test", ResolvableType.forClass(SampleType.class)));
 	}
 
 	@Test
@@ -176,6 +178,39 @@ class BindConverterTests {
 				null);
 		Duration result = bindConverter.convert("10s", ResolvableType.forClass(Duration.class));
 		assertThat(result.getSeconds()).isEqualTo(10);
+	}
+
+	@Test // gh-27028
+	void convertWhenConversionFailsThrowsConversionFailedExceptionRatherThanConverterNotFoundException() {
+		BindConverter bindConverter = BindConverter.get(Collections.singletonList(new GenericConversionService()),
+				null);
+		assertThatExceptionOfType(ConversionFailedException.class)
+			.isThrownBy(() -> bindConverter.convert("com.example.Missing", ResolvableType.forClass(Class.class)))
+			.withRootCauseInstanceOf(ClassNotFoundException.class);
+	}
+
+	@Test
+	void convertWhenUsingTypeConverterConversionServiceFromMultipleThreads() {
+		BindConverter bindConverter = getPropertyEditorOnlyBindConverter(this::registerSampleTypeEditor);
+		ResolvableType type = ResolvableType.forClass(SampleType.class);
+		List<Thread> threads = new ArrayList<>();
+		List<SampleType> results = Collections.synchronizedList(new ArrayList<>());
+		for (int i = 0; i < 40; i++) {
+			threads.add(new Thread(() -> {
+				for (int j = 0; j < 20; j++) {
+					results.add(bindConverter.convert("test", type));
+				}
+			}));
+		}
+		threads.forEach(Thread::start);
+		for (Thread thread : threads) {
+			try {
+				thread.join();
+			}
+			catch (InterruptedException ex) {
+			}
+		}
+		assertThat(results).isNotEmpty().doesNotContainNull();
 	}
 
 	private BindConverter getPropertyEditorOnlyBindConverter(
@@ -206,10 +241,13 @@ class BindConverterTests {
 	static class SampleTypePropertyEditor extends PropertyEditorSupport {
 
 		@Override
-		public void setAsText(String text) throws IllegalArgumentException {
-			SampleType value = new SampleType();
-			value.text = text;
-			setValue(value);
+		public void setAsText(String text) {
+			setValue(null);
+			if (text != null) {
+				SampleType value = new SampleType();
+				value.text = text;
+				setValue(value);
+			}
 		}
 
 	}
@@ -238,7 +276,7 @@ class BindConverterTests {
 	static class ConventionTypeEditor extends PropertyEditorSupport {
 
 		@Override
-		public void setAsText(String text) throws IllegalArgumentException {
+		public void setAsText(String text) {
 			ConventionType value = new ConventionType();
 			value.text = text;
 			setValue(value);

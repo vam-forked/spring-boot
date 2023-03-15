@@ -1,5 +1,5 @@
 /*
- * Copyright 2012-2021 the original author or authors.
+ * Copyright 2012-2023 the original author or authors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -87,6 +87,14 @@ class CloudPlatformTests {
 	}
 
 	@Test
+	void getActiveWhenHasNomadAllocIdShouldReturnNomad() {
+		Environment environment = new MockEnvironment().withProperty("NOMAD_ALLOC_ID", "---");
+		CloudPlatform platform = CloudPlatform.getActive(environment);
+		assertThat(platform).isEqualTo(CloudPlatform.NOMAD);
+		assertThat(platform.isActive(environment)).isTrue();
+	}
+
+	@Test
 	void getActiveWhenHasKubernetesServiceHostAndPortShouldReturnKubernetes() {
 		Map<String, Object> envVars = new HashMap<>();
 		envVars.put("KUBERNETES_SERVICE_HOST", "---");
@@ -133,10 +141,12 @@ class CloudPlatformTests {
 	}
 
 	@Test
-	void getActiveWhenHasWebsiteSiteNameAndWebsitesEnableAppServiceStorageShouldReturnAzureAppService() {
+	void getActiveWhenHasAllAzureEnvVariablesShouldReturnAzureAppService() {
 		Map<String, Object> envVars = new HashMap<>();
 		envVars.put("WEBSITE_SITE_NAME", "---");
-		envVars.put("WEBSITES_ENABLE_APP_SERVICE_STORAGE", "false");
+		envVars.put("WEBSITE_INSTANCE_ID", "1234");
+		envVars.put("WEBSITE_RESOURCE_GROUP", "test");
+		envVars.put("WEBSITE_SKU", "1234");
 		Environment environment = getEnvironmentWithEnvVariables(envVars);
 		CloudPlatform platform = CloudPlatform.getActive(environment);
 		assertThat(platform).isEqualTo(CloudPlatform.AZURE_APP_SERVICE);
@@ -144,16 +154,45 @@ class CloudPlatformTests {
 	}
 
 	@Test
-	void getActiveWhenHasWebsiteSiteNameAndNoWebsitesEnableAppServiceStorageShouldNotReturnAzureAppService() {
-		Environment environment = getEnvironmentWithEnvVariables(Collections.singletonMap("WEBSITE_SITE_NAME", "---"));
+	void getActiveWhenHasMissingWebsiteSiteNameShouldNotReturnAzureAppService() {
+		Map<String, Object> envVars = new HashMap<>();
+		envVars.put("WEBSITE_INSTANCE_ID", "1234");
+		envVars.put("WEBSITE_RESOURCE_GROUP", "test");
+		envVars.put("WEBSITE_SKU", "1234");
+		Environment environment = getEnvironmentWithEnvVariables(envVars);
 		CloudPlatform platform = CloudPlatform.getActive(environment);
 		assertThat(platform).isNull();
 	}
 
 	@Test
-	void getActiveWhenHasWebsitesEnableAppServiceStorageAndNoWebsiteSiteNameShouldNotReturnAzureAppService() {
-		Environment environment = getEnvironmentWithEnvVariables(
-				Collections.singletonMap("WEBSITES_ENABLE_APP_SERVICE_STORAGE", "false"));
+	void getActiveWhenHasMissingWebsiteInstanceIdShouldNotReturnAzureAppService() {
+		Map<String, Object> envVars = new HashMap<>();
+		envVars.put("WEBSITE_SITE_NAME", "---");
+		envVars.put("WEBSITE_RESOURCE_GROUP", "test");
+		envVars.put("WEBSITE_SKU", "1234");
+		Environment environment = getEnvironmentWithEnvVariables(envVars);
+		CloudPlatform platform = CloudPlatform.getActive(environment);
+		assertThat(platform).isNull();
+	}
+
+	@Test
+	void getActiveWhenHasMissingWebsiteResourceGroupShouldNotReturnAzureAppService() {
+		Map<String, Object> envVars = new HashMap<>();
+		envVars.put("WEBSITE_SITE_NAME", "---");
+		envVars.put("WEBSITE_INSTANCE_ID", "1234");
+		envVars.put("WEBSITE_SKU", "1234");
+		Environment environment = getEnvironmentWithEnvVariables(envVars);
+		CloudPlatform platform = CloudPlatform.getActive(environment);
+		assertThat(platform).isNull();
+	}
+
+	@Test
+	void getActiveWhenHasMissingWebsiteSkuShouldNotReturnAzureAppService() {
+		Map<String, Object> envVars = new HashMap<>();
+		envVars.put("WEBSITE_SITE_NAME", "---");
+		envVars.put("WEBSITE_INSTANCE_ID", "1234");
+		envVars.put("WEBSITE_RESOURCE_GROUP", "test");
+		Environment environment = getEnvironmentWithEnvVariables(envVars);
 		CloudPlatform platform = CloudPlatform.getActive(environment);
 		assertThat(platform).isNull();
 	}
@@ -211,7 +250,7 @@ class CloudPlatformTests {
 		Environment environment = getEnvironmentWithEnvVariables(envVars);
 		((MockEnvironment) environment).setProperty("spring.main.cloud-platform", "none");
 		assertThat(Stream.of(CloudPlatform.values()).filter((platform) -> platform.isActive(environment)))
-				.containsExactly(CloudPlatform.NONE);
+			.containsExactly(CloudPlatform.NONE);
 	}
 
 	private Environment getEnvironmentWithEnvVariables(Map<String, Object> environmentVariables) {

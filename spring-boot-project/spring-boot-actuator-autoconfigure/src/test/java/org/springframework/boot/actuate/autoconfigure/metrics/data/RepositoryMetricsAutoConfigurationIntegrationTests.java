@@ -1,5 +1,5 @@
 /*
- * Copyright 2012-2021 the original author or authors.
+ * Copyright 2012-2023 the original author or authors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -16,7 +16,9 @@
 
 package org.springframework.boot.actuate.autoconfigure.metrics.data;
 
+import io.micrometer.core.instrument.Gauge;
 import io.micrometer.core.instrument.MeterRegistry;
+import io.micrometer.core.instrument.binder.MeterBinder;
 import org.junit.jupiter.api.Test;
 
 import org.springframework.boot.actuate.autoconfigure.metrics.data.city.CityRepository;
@@ -28,6 +30,7 @@ import org.springframework.boot.autoconfigure.data.jpa.JpaRepositoriesAutoConfig
 import org.springframework.boot.autoconfigure.jdbc.EmbeddedDataSourceConfiguration;
 import org.springframework.boot.autoconfigure.orm.jpa.HibernateJpaAutoConfiguration;
 import org.springframework.boot.test.context.runner.ApplicationContextRunner;
+import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -40,24 +43,42 @@ import static org.assertj.core.api.Assertions.assertThat;
 class RepositoryMetricsAutoConfigurationIntegrationTests {
 
 	private final ApplicationContextRunner contextRunner = new ApplicationContextRunner().with(MetricsRun.simple())
-			.withConfiguration(
-					AutoConfigurations.of(HibernateJpaAutoConfiguration.class, JpaRepositoriesAutoConfiguration.class,
-							PropertyPlaceholderAutoConfiguration.class, RepositoryMetricsAutoConfiguration.class))
-			.withUserConfiguration(EmbeddedDataSourceConfiguration.class, TestConfig.class);
+		.withConfiguration(
+				AutoConfigurations.of(HibernateJpaAutoConfiguration.class, JpaRepositoriesAutoConfiguration.class,
+						PropertyPlaceholderAutoConfiguration.class, RepositoryMetricsAutoConfiguration.class))
+		.withUserConfiguration(EmbeddedDataSourceConfiguration.class, TestConfig.class);
 
 	@Test
 	void repositoryMethodCallRecordsMetrics() {
 		this.contextRunner.run((context) -> {
 			context.getBean(CityRepository.class).count();
 			MeterRegistry registry = context.getBean(MeterRegistry.class);
-			assertThat(registry.get("spring.data.repository.invocations").tag("repository", "CityRepository").timer()
-					.count()).isEqualTo(1);
+			assertThat(registry.get("spring.data.repository.invocations")
+				.tag("repository", "CityRepository")
+				.timer()
+				.count()).isOne();
 		});
+	}
+
+	@Test
+	void doesNotPreventMeterBindersFromDependingUponSpringDataRepositories() {
+		this.contextRunner.withUserConfiguration(SpringDataRepositoryMeterBinderConfiguration.class)
+			.run((context) -> assertThat(context).hasNotFailed());
 	}
 
 	@Configuration(proxyBeanMethods = false)
 	@AutoConfigurationPackage
 	static class TestConfig {
+
+	}
+
+	@Configuration(proxyBeanMethods = false)
+	static class SpringDataRepositoryMeterBinderConfiguration {
+
+		@Bean
+		MeterBinder meterBinder(CityRepository repository) {
+			return (registry) -> Gauge.builder("city.count", repository::count);
+		}
 
 	}
 

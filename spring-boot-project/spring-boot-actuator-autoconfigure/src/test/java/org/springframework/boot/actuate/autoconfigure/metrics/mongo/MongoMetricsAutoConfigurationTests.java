@@ -1,5 +1,5 @@
 /*
- * Copyright 2012-2021 the original author or authors.
+ * Copyright 2012-2023 the original author or authors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -20,6 +20,7 @@ import java.util.List;
 
 import com.mongodb.MongoClientSettings;
 import com.mongodb.client.MongoClient;
+import com.mongodb.client.internal.MongoClientImpl;
 import com.mongodb.connection.ConnectionPoolSettings;
 import com.mongodb.event.ConnectionPoolListener;
 import io.micrometer.core.instrument.binder.mongodb.DefaultMongoCommandTagsProvider;
@@ -51,119 +52,124 @@ import static org.mockito.Mockito.mock;
 class MongoMetricsAutoConfigurationTests {
 
 	private final ApplicationContextRunner contextRunner = new ApplicationContextRunner()
-			.withConfiguration(AutoConfigurations.of(MongoMetricsAutoConfiguration.class));
+		.withConfiguration(AutoConfigurations.of(MongoMetricsAutoConfiguration.class));
 
 	@Test
 	void whenThereIsAMeterRegistryThenMetricsCommandListenerIsAdded() {
 		this.contextRunner.with(MetricsRun.simple())
-				.withConfiguration(AutoConfigurations.of(MongoAutoConfiguration.class)).run((context) -> {
-					assertThat(context).hasSingleBean(MongoMetricsCommandListener.class);
-					assertThat(getActualMongoClientSettingsUsedToConstructClient(context)).isNotNull()
-							.extracting(MongoClientSettings::getCommandListeners).asList()
-							.containsExactly(context.getBean(MongoMetricsCommandListener.class));
-					assertThat(getMongoCommandTagsProviderUsedToConstructListener(context))
-							.isInstanceOf(DefaultMongoCommandTagsProvider.class);
-				});
+			.withConfiguration(AutoConfigurations.of(MongoAutoConfiguration.class))
+			.run((context) -> {
+				assertThat(context).hasSingleBean(MongoMetricsCommandListener.class);
+				assertThat(getActualMongoClientSettingsUsedToConstructClient(context))
+					.extracting(MongoClientSettings::getCommandListeners)
+					.asList()
+					.containsExactly(context.getBean(MongoMetricsCommandListener.class));
+				assertThat(getMongoCommandTagsProviderUsedToConstructListener(context))
+					.isInstanceOf(DefaultMongoCommandTagsProvider.class);
+			});
 	}
 
 	@Test
 	void whenThereIsAMeterRegistryThenMetricsConnectionPoolListenerIsAdded() {
 		this.contextRunner.with(MetricsRun.simple())
-				.withConfiguration(AutoConfigurations.of(MongoAutoConfiguration.class)).run((context) -> {
-					assertThat(context).hasSingleBean(MongoMetricsConnectionPoolListener.class);
-					assertThat(getConnectionPoolListenersFromClient(context))
-							.containsExactly(context.getBean(MongoMetricsConnectionPoolListener.class));
-					assertThat(getMongoConnectionPoolTagsProviderUsedToConstructListener(context))
-							.isInstanceOf(DefaultMongoConnectionPoolTagsProvider.class);
-				});
+			.withConfiguration(AutoConfigurations.of(MongoAutoConfiguration.class))
+			.run((context) -> {
+				assertThat(context).hasSingleBean(MongoMetricsConnectionPoolListener.class);
+				assertThat(getConnectionPoolListenersFromClient(context))
+					.containsExactly(context.getBean(MongoMetricsConnectionPoolListener.class));
+				assertThat(getMongoConnectionPoolTagsProviderUsedToConstructListener(context))
+					.isInstanceOf(DefaultMongoConnectionPoolTagsProvider.class);
+			});
 	}
 
 	@Test
 	void whenThereIsNoMeterRegistryThenNoMetricsCommandListenerIsAdded() {
 		this.contextRunner.withConfiguration(AutoConfigurations.of(MongoAutoConfiguration.class))
-				.run(assertThatMetricsCommandListenerNotAdded());
+			.run(assertThatMetricsCommandListenerNotAdded());
 	}
 
 	@Test
 	void whenThereIsNoMeterRegistryThenNoMetricsConnectionPoolListenerIsAdded() {
 		this.contextRunner.withConfiguration(AutoConfigurations.of(MongoAutoConfiguration.class))
-				.run(assertThatMetricsConnectionPoolListenerNotAdded());
+			.run(assertThatMetricsConnectionPoolListenerNotAdded());
 	}
 
 	@Test
 	void whenThereIsACustomMetricsCommandTagsProviderItIsUsed() {
 		final MongoCommandTagsProvider customTagsProvider = mock(MongoCommandTagsProvider.class);
 		this.contextRunner.with(MetricsRun.simple())
-				.withConfiguration(AutoConfigurations.of(MongoAutoConfiguration.class))
-				.withBean("customMongoCommandTagsProvider", MongoCommandTagsProvider.class, () -> customTagsProvider)
-				.run((context) -> assertThat(getMongoCommandTagsProviderUsedToConstructListener(context))
-						.isSameAs(customTagsProvider));
+			.withConfiguration(AutoConfigurations.of(MongoAutoConfiguration.class))
+			.withBean("customMongoCommandTagsProvider", MongoCommandTagsProvider.class, () -> customTagsProvider)
+			.run((context) -> assertThat(getMongoCommandTagsProviderUsedToConstructListener(context))
+				.isSameAs(customTagsProvider));
 	}
 
 	@Test
 	void whenThereIsACustomMetricsConnectionPoolTagsProviderItIsUsed() {
 		final MongoConnectionPoolTagsProvider customTagsProvider = mock(MongoConnectionPoolTagsProvider.class);
 		this.contextRunner.with(MetricsRun.simple())
-				.withConfiguration(AutoConfigurations.of(MongoAutoConfiguration.class))
-				.withBean("customMongoConnectionPoolTagsProvider", MongoConnectionPoolTagsProvider.class,
-						() -> customTagsProvider)
-				.run((context) -> assertThat(getMongoConnectionPoolTagsProviderUsedToConstructListener(context))
-						.isSameAs(customTagsProvider));
+			.withConfiguration(AutoConfigurations.of(MongoAutoConfiguration.class))
+			.withBean("customMongoConnectionPoolTagsProvider", MongoConnectionPoolTagsProvider.class,
+					() -> customTagsProvider)
+			.run((context) -> assertThat(getMongoConnectionPoolTagsProviderUsedToConstructListener(context))
+				.isSameAs(customTagsProvider));
 	}
 
 	@Test
 	void whenThereIsNoMongoClientSettingsOnClasspathThenNoMetricsCommandListenerIsAdded() {
 		this.contextRunner.with(MetricsRun.simple())
-				.withConfiguration(AutoConfigurations.of(MongoAutoConfiguration.class))
-				.withClassLoader(new FilteredClassLoader(MongoClientSettings.class))
-				.run(assertThatMetricsCommandListenerNotAdded());
+			.withConfiguration(AutoConfigurations.of(MongoAutoConfiguration.class))
+			.withClassLoader(new FilteredClassLoader(MongoClientSettings.class))
+			.run(assertThatMetricsCommandListenerNotAdded());
 	}
 
 	@Test
 	void whenThereIsNoMongoClientSettingsOnClasspathThenNoMetricsConnectionPoolListenerIsAdded() {
 		this.contextRunner.with(MetricsRun.simple())
-				.withConfiguration(AutoConfigurations.of(MongoAutoConfiguration.class))
-				.withClassLoader(new FilteredClassLoader(MongoClientSettings.class))
-				.run(assertThatMetricsConnectionPoolListenerNotAdded());
+			.withConfiguration(AutoConfigurations.of(MongoAutoConfiguration.class))
+			.withClassLoader(new FilteredClassLoader(MongoClientSettings.class))
+			.run(assertThatMetricsConnectionPoolListenerNotAdded());
 	}
 
 	@Test
 	void whenThereIsNoMongoMetricsCommandListenerOnClasspathThenNoMetricsCommandListenerIsAdded() {
 		this.contextRunner.with(MetricsRun.simple())
-				.withConfiguration(AutoConfigurations.of(MongoAutoConfiguration.class))
-				.withClassLoader(new FilteredClassLoader(MongoMetricsCommandListener.class))
-				.run(assertThatMetricsCommandListenerNotAdded());
+			.withConfiguration(AutoConfigurations.of(MongoAutoConfiguration.class))
+			.withClassLoader(new FilteredClassLoader(MongoMetricsCommandListener.class))
+			.run(assertThatMetricsCommandListenerNotAdded());
 	}
 
 	@Test
 	void whenThereIsNoMongoMetricsConnectionPoolListenerOnClasspathThenNoMetricsConnectionPoolListenerIsAdded() {
 		this.contextRunner.with(MetricsRun.simple())
-				.withConfiguration(AutoConfigurations.of(MongoAutoConfiguration.class))
-				.withClassLoader(new FilteredClassLoader(MongoMetricsConnectionPoolListener.class))
-				.run(assertThatMetricsConnectionPoolListenerNotAdded());
+			.withConfiguration(AutoConfigurations.of(MongoAutoConfiguration.class))
+			.withClassLoader(new FilteredClassLoader(MongoMetricsConnectionPoolListener.class))
+			.run(assertThatMetricsConnectionPoolListenerNotAdded());
 	}
 
 	@Test
 	void whenMetricsCommandListenerEnabledPropertyFalseThenNoMetricsCommandListenerIsAdded() {
 		this.contextRunner.with(MetricsRun.simple())
-				.withConfiguration(AutoConfigurations.of(MongoAutoConfiguration.class))
-				.withPropertyValues("management.metrics.mongo.command.enabled:false")
-				.run(assertThatMetricsCommandListenerNotAdded());
+			.withConfiguration(AutoConfigurations.of(MongoAutoConfiguration.class))
+			.withPropertyValues("management.metrics.mongo.command.enabled:false")
+			.run(assertThatMetricsCommandListenerNotAdded());
 	}
 
 	@Test
 	void whenMetricsConnectionPoolListenerEnabledPropertyFalseThenNoMetricsConnectionPoolListenerIsAdded() {
 		this.contextRunner.with(MetricsRun.simple())
-				.withConfiguration(AutoConfigurations.of(MongoAutoConfiguration.class))
-				.withPropertyValues("management.metrics.mongo.connectionpool.enabled:false")
-				.run(assertThatMetricsConnectionPoolListenerNotAdded());
+			.withConfiguration(AutoConfigurations.of(MongoAutoConfiguration.class))
+			.withPropertyValues("management.metrics.mongo.connectionpool.enabled:false")
+			.run(assertThatMetricsConnectionPoolListenerNotAdded());
 	}
 
 	private ContextConsumer<AssertableApplicationContext> assertThatMetricsCommandListenerNotAdded() {
 		return (context) -> {
 			assertThat(context).doesNotHaveBean(MongoMetricsCommandListener.class);
-			assertThat(getActualMongoClientSettingsUsedToConstructClient(context)).isNotNull()
-					.extracting(MongoClientSettings::getCommandListeners).asList().isEmpty();
+			assertThat(getActualMongoClientSettingsUsedToConstructClient(context))
+				.extracting(MongoClientSettings::getCommandListeners)
+				.asList()
+				.isEmpty();
 		};
 	}
 
@@ -176,18 +182,15 @@ class MongoMetricsAutoConfigurationTests {
 
 	private MongoClientSettings getActualMongoClientSettingsUsedToConstructClient(
 			final AssertableApplicationContext context) {
-		final MongoClient mongoClient = context.getBean(MongoClient.class);
-		return (MongoClientSettings) ReflectionTestUtils.getField(mongoClient, "settings");
+		final MongoClientImpl mongoClient = (MongoClientImpl) context.getBean(MongoClient.class);
+		return mongoClient.getSettings();
 	}
 
 	private List<ConnectionPoolListener> getConnectionPoolListenersFromClient(
 			final AssertableApplicationContext context) {
 		MongoClientSettings mongoClientSettings = getActualMongoClientSettingsUsedToConstructClient(context);
 		ConnectionPoolSettings connectionPoolSettings = mongoClientSettings.getConnectionPoolSettings();
-		@SuppressWarnings("unchecked")
-		List<ConnectionPoolListener> listeners = (List<ConnectionPoolListener>) ReflectionTestUtils
-				.getField(connectionPoolSettings, "connectionPoolListeners");
-		return listeners;
+		return connectionPoolSettings.getConnectionPoolListeners();
 	}
 
 	private MongoCommandTagsProvider getMongoCommandTagsProviderUsedToConstructListener(
